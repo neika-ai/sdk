@@ -57,7 +57,7 @@ class CatalogIngestClient
         }
 
         throw new \InvalidArgumentException(sprintf(
-            'A catalog change carries %d external ids; expected 1 to %d. Chunk larger batches before sending.',
+            'A catalog change has %d external ids. Send 1 to %d per call.',
             $count,
             $this->getMaxExternalIdsPerRequest(),
         ));

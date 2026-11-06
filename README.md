@@ -1,16 +1,16 @@
 # Neika SDK
 
-Framework-agnostic PHP core for the Neika chatbot. PHP 8.1+, no framework required. MIT.
+Framework-agnostic PHP core for the Neika chatbot. PHP 8.1+, MIT.
 
 Symfony users: use [`neika-ai/symfony-bundle`](https://github.com/neika-ai/symfony-bundle).
 Sylius users: use [`neika-ai/sylius-plugin`](https://github.com/neika-ai/sylius-plugin).
 
 ## Features
 
-- [Tools and data sources](#examples) — one class each; the JSON Schema comes from your validator constraints
+- [Tools and data sources](#tools-and-data-sources) — one class each; the JSON Schema comes from your validator constraints
 - [Personal data in tools](#personal-data-in-tools) — a model hosted outside the EU reads placeholders; the customer sees real values
-- [Standalone setup](#standalone-setup-no-framework) — the four `/chatbot/v1` endpoints in plain PHP
-- [Push catalog changes](#outbound-push-catalog-changes) — the chatbot re-indexes just the entries you changed
+- [Standalone setup](#standalone-setup) — the four `/chatbot/v1` endpoints in plain PHP
+- [Push catalog changes](#push-catalog-changes) — the chatbot re-indexes just the entries you changed
 - [Chat click tracking](#chat-click-tracking) — chat link visits, orders and revenue in the dashboard
 - [Pairing](#pairing) — the shop admin clicks **Connect**; nobody copies a secret
 - [Widget embed](#widget-embed) — one call prints the chat widget
@@ -21,9 +21,9 @@ Sylius users: use [`neika-ai/sylius-plugin`](https://github.com/neika-ai/sylius-
 composer require neika-ai/sdk
 ```
 
-## Examples
+## Tools and data sources
 
-A tool — one class, one arguments DTO:
+A tool is one class plus one arguments DTO:
 
 ```php
 use Neika\Sdk\Contract\ChatbotToolInterface;
@@ -51,8 +51,7 @@ class GreetTool implements ChatbotToolInterface
 }
 ```
 
-Argument DTOs carry `symfony/validator` constraints; `ArgumentsSchemaGenerator` turns them into a
-JSON Schema (with runtime-loaded choice enums):
+`ArgumentsSchemaGenerator` turns the DTO's `symfony/validator` constraints into a JSON Schema:
 
 ```php
 use Symfony\Component\Validator\Constraints as Assert;
@@ -73,24 +72,19 @@ class GreetArguments
 //     'required' => ['name'], 'additionalProperties' => false]
 ```
 
-Registries wrap a plain iterable of tools/sources and key them by `getDefinition()->name`:
+For choices loaded at runtime (from the DB, say), put `#[ToolChoice(loader: RegionLoader::class)]` on the
+property and implement `ToolChoiceLoaderInterface`. The schema lists the loaded values as its `enum`.
 
-```php
-$tool = $toolRegistry->get('greet');   // null when unknown
-foreach ($toolRegistry->all() as $tool) { /* ... */ }
-```
+A data source implements `ChatbotDataSourceInterface` and returns a `DocumentPage` of `SourceDocument`s.
+Page through it with `CursorCodec`; `HtmlToText` turns your HTML into plain text.
 
-Names must be unique — on a duplicate, `get()` returns the first match. The Symfony bundle fails
-the container build on a duplicate; standalone, keep them distinct yourself.
-
-Also here: `ChatbotDataSourceInterface` (bulk documents), `ToolChoiceLoaderInterface` +
-`#[ToolChoice]` (DB-backed enums), the `ChatbotLocaleContextInterface` port the host app implements,
-result DTOs (`ToolResult`, `ToolDefinition`, `SourceDocument`, …) and helpers (`CursorCodec`,
-`LocaleMatcher`, `HtmlToText`).
+**Names must be unique.** The registries look tools and sources up by `getDefinition()->name`, and the
+first match wins. The Symfony bundle fails the container build on a duplicate. Standalone, keep them
+distinct yourself.
 
 ## Personal data in tools
 
-**Never put personal data in the text the model reads.** Write a slot, send the value beside it:
+**Never put personal data in the text the model reads.** Write a slot and send the value next to it:
 
 ```php
 use Neika\Sdk\DTO\ContentItem;
@@ -106,8 +100,9 @@ return new ToolResult(
 );
 ```
 
-**Name it so the model knows what it is.** `customer_full_name`, not `name`. Lowercase letters, digits and
-underscores, starting with a letter, up to 64 characters. A value with any other name is skipped.
+**Name the slot so the model knows what it is.** `customer_full_name`, not `name`. Use lowercase
+letters, digits and underscores, start with a letter, and stay within 64 characters. A value with any
+other name is skipped.
 
 With a translated message, pass the slot as the parameter:
 
@@ -115,8 +110,8 @@ With a translated message, pass the slot as the parameter:
 $this->translator->trans('order.summary', ['%name%' => '{{customer_full_name}}'], locale: $context->locale);
 ```
 
-The customer sees `Jan Novák`. A model hosted outside the EU sees `{{customer_full_name_1}}`, and can pass it to
-another tool, which receives the real value.
+The customer sees `Jan Novák`. A model hosted outside the EU sees `{{customer_full_name_1}}`. It can
+pass that to another tool, and that tool gets the real value.
 
 | Send | Where |
 |---|---|
@@ -124,21 +119,19 @@ another tool, which receives the real value.
 | Order state, totals, item counts, product names | The text |
 | Anything only the customer needs to see | `blocks` |
 
-**No value, no slot.** If a customer has no tracking code, leave that sentence out. A slot with no value reaches the
-model as plain text. If its name ends in a number, like `{{address_1}}`, it's removed from the reply.
+**No value, no slot.** If a customer has no tracking code, leave that sentence out. A slot with no value
+reaches the model as plain text. If its name ends in a number, like `{{address_1}}`, it's removed from
+the reply.
 
-**Form fields need nothing.** `text` and `email` values are hidden from that model for you, and your tool still gets
-the real ones. Set `placeholder` on the field for a clearer name than its field name:
+**Form fields need nothing.** That model never sees `text` and `email` values, and your tool still gets
+the real ones. Set `placeholder` on the field to give the slot a clearer name than the field name:
 
 ```php
 new FormField('orderNumber', 'order.number', FormFieldType::Text, true, placeholder: 'customer_order_number');
 ```
 
-> Needs a chatbot backend that reads `privateValues`. An older one sends `{{customer_full_name}}` to the model as
-> plain text.
-
-**Mark arguments that carry personal data.** Put `#[Sensitive]` on the property. A model hosted outside the EU
-sees a placeholder for it, and your tool still gets the real value:
+**Mark arguments that carry personal data.** Put `#[Sensitive]` on the property. That model sees a
+placeholder, and your tool still gets the real value:
 
 ```php
 use Neika\Sdk\Validator\Sensitive;
@@ -149,34 +142,39 @@ use Neika\Sdk\Validator\Sensitive;
 public string $email = '',
 ```
 
-Unmarked arguments reach that model as typed. Mark contact data only: emails, phones, names, addresses, customer
-and order numbers.
+Unmarked arguments reach the model as typed. Mark contact data only: emails, phones, names, addresses,
+customer and order numbers.
 
-## Standalone setup (no framework)
+## Standalone setup
 
-The SDK owns the logic, not the transport. You wire the registries once, then map four HTTP routes
-to them.
+Without a framework, you bring auth, routing and argument deserialization. The SDK does the rest.
 
-Wire the pieces — each registry takes a plain list of services, no container:
+1. Wire the registries. Each takes a plain list of services:
 
 ```php
-use Neika\Sdk\Registry\ToolRegistry;
 use Neika\Sdk\Registry\DataSourceRegistry;
 use Neika\Sdk\Registry\ToolChoiceLoaderRegistry;
+use Neika\Sdk\Registry\ToolRegistry;
 use Neika\Sdk\Schema\ArgumentsSchemaGenerator;
+use Neika\Sdk\Validator\ToolChoiceValidator;
+use Symfony\Component\Validator\ConstraintValidatorFactory;
 use Symfony\Component\Validator\Validation;
 
-$tools   = [new GreetTool()];   // ChatbotToolInterface, keyed at runtime by getDefinition()->name
-$sources = [];                  // ChatbotDataSourceInterface
-$loaders = [];                  // ToolChoiceLoaderInterface, matched by class
-
-$toolRegistry   = new ToolRegistry($tools);
-$sourceRegistry = new DataSourceRegistry($sources);
-$schema         = new ArgumentsSchemaGenerator(new ToolChoiceLoaderRegistry($loaders));
-$validator      = Validation::createValidatorBuilder()->enableAttributeMapping()->getValidator();
+$toolRegistry   = new ToolRegistry([new GreetTool()]);
+$sourceRegistry = new DataSourceRegistry([]);         // ChatbotDataSourceInterface
+$choiceLoaders  = new ToolChoiceLoaderRegistry([]);   // ToolChoiceLoaderInterface
+$schema         = new ArgumentsSchemaGenerator($choiceLoaders);
+$validator      = Validation::createValidatorBuilder()
+    ->enableAttributeMapping()
+    ->setConstraintValidatorFactory(new ConstraintValidatorFactory([
+        ToolChoiceValidator::class => new ToolChoiceValidator($choiceLoaders),
+    ]))
+    ->getValidator();
 ```
 
-`GET /chatbot/v1/tools` — tool list with input schemas:
+> Without that validator factory, validating a `#[ToolChoice]` argument throws `ArgumentCountError`.
+
+2. `GET /chatbot/v1/tools` lists the tools with their input schemas:
 
 ```php
 $out = [];
@@ -190,13 +188,14 @@ foreach ($toolRegistry->all() as $tool) {
 echo json_encode(['tools' => $out]);
 ```
 
-`POST /chatbot/v1/tools/{name}` — body `{ "arguments": {...}, "context": {...} }`:
+3. `POST /chatbot/v1/tools/{name}` runs a tool. Deserialize the arguments with any deserializer; the
+   bundles use `symfony/serializer`:
 
 ```php
 use Neika\Sdk\DTO\ToolCallContext;
 use Neika\Sdk\DTO\Violation;
-use Neika\Sdk\Exception\ToolNotFoundException;
 use Neika\Sdk\Exception\ArgumentsValidationException;
+use Neika\Sdk\Exception\ToolNotFoundException;
 
 $tool = $toolRegistry->get($name) ?? throw new ToolNotFoundException($name);
 $body = json_decode($rawRequestBody, true);
@@ -219,7 +218,7 @@ $context = new ToolCallContext(
 echo json_encode($tool->execute($arguments, $context)->jsonSerialize());
 ```
 
-`GET /chatbot/v1/sources` and `GET /chatbot/v1/sources/{name}`:
+4. `GET /chatbot/v1/sources` and `GET /chatbot/v1/sources/{name}` list and read the data sources:
 
 ```php
 use Neika\Sdk\DTO\SourceQuery;
@@ -243,37 +242,39 @@ $query = new SourceQuery(
 echo json_encode($source->getDocuments($query)->jsonSerialize());
 ```
 
-You provide, around the SDK: **auth**, **routing**, and **argument deserialization** (any
-deserializer; the bundles use `symfony/serializer`). Locale
-matching against a channel's served locales is optional — use `LocaleMatcher` and implement
-`ChatbotLocaleContextInterface` if you have channels.
+Have channels? Implement `ChatbotLocaleContextInterface` and match the requested locale against a
+channel's locales with `LocaleMatcher`.
 
-## HTTP contract (what the chatbot backend expects)
+## HTTP contract
 
-The paths are fixed: the backend calls `/chatbot/v1/...` on your host. Serve the endpoints at exactly
-these paths — only the origin (scheme + host) is yours to configure on the backend.
+**The paths are fixed.** The backend calls `/chatbot/v1/...` on your host; you only set the origin
+(scheme and host) on the backend.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/chatbot/v1/tools` | `Accept-Language` (optional) | `{ "tools": [ {name, description, inputSchema, sensitiveArguments, ui?} ] }` |
 | POST | `/chatbot/v1/tools/{name}` | `{ "arguments": {...}, "context": { "conversationId", "locale", "channelCode"? } }` | `{ "content": [{type,text}], "blocks": [], "isError": bool, "privateValues"?: [{key,value}] }` |
 | GET | `/chatbot/v1/sources` | — | `{ "sources": [ {name, description, locales} ] }` |
-| GET | `/chatbot/v1/sources/{name}` | `?locale=&channel=&cursor=&ids[]=` (`ids[]` max 500; then `cursor` ignored, `nextCursor` null) | `{ "documents": [...], "nextCursor": string\|null }` |
+| GET | `/chatbot/v1/sources/{name}` | `?locale=&channel=&cursor=&ids[]=` | `{ "documents": [...], "nextCursor": string\|null }` |
 
-- **Auth** — the backend sends `Authorization: Bearer <api-secret>`. The SDK does no auth; verify
-  the header yourself (`hash_equals`) or let the Symfony bundle's firewall do it.
-- **Errors** — every failure returns `{ "error": { "code", "message", "violations" } }`. Throw a
-  `ChatbotApiException` subclass; `getErrorCode()` gives the `code`, `getStatusCode()` the HTTP
-  status (`tool_not_found`/`source_not_found` 404, `validation_failed` 422 with `violations`,
-  `invalid_cursor`/`invalid_locale` 400).
+- `ids[]` takes up to 500 ids. With `ids[]`, the cursor is ignored and `nextCursor` is `null`.
+- **Check the auth header yourself.** The backend sends `Authorization: Bearer <apiSecret>`. Compare it
+  with `hash_equals()`, or let the Symfony bundle's firewall do it.
+- Every failure returns `{ "error": { "code", "message", "violations" } }`. Throw a `ChatbotApiException`
+  subclass: `getErrorCode()` gives the `code`, `getStatusCode()` the HTTP status.
 
-## Outbound: push catalog changes
+| Exception | Code | Status |
+|---|---|---|
+| `ToolNotFoundException` | `tool_not_found` | 404 |
+| `SourceNotFoundException` | `source_not_found` | 404 |
+| `ArgumentsValidationException` | `validation_failed`, with `violations` | 422 |
+| `InvalidCursorException` | `invalid_cursor` | 400 |
+| `InvalidLocaleException` | `invalid_locale` | 400 |
 
-Tell the backend which catalog entries changed so it re-indexes them —
-`POST {backend}/api/v1/catalog/changes`, auth `Bearer {siteKey}.{ingestSecret}`.
+## Push catalog changes
 
-The client speaks PSR-18, so plug in any HTTP client (Guzzle, Symfony's `Psr18Client`, …) and PSR-17
-factories:
+Tell the backend which catalog entries changed, and it re-indexes them. The client speaks PSR-18, so
+plug in any HTTP client (Guzzle, Symfony's `Psr18Client`) and PSR-17 factories:
 
 ```php
 use Neika\Sdk\DTO\CatalogChange;
@@ -293,32 +294,32 @@ $change = new CatalogChange(CatalogSourceName::Products, 'cs_CZ', ['CLIPPER-01',
 $result = $client->send($credentials, $change);
 
 if ($result->isThrottled()) {
-    // nothing was queued — send the same ids again after $result->retryAfterSeconds
+    // nothing was queued: send the same ids again after $result->retryAfterSeconds
 }
 foreach ($result->jobs as $job) {
     // $job->externalId, $job->jobId, $job->status (CatalogJobStatus), $job->violation
 }
 ```
 
-**Credentials go in per call, not in the constructor.** Build `SiteCredentials` from wherever you
-store them, right before the call → a re-paired secret works on the next call, also in long-running
-workers.
+**Build `SiteCredentials` right before each call.** The client doesn't keep them, so a re-paired secret
+works on the next call, in long-running workers too.
 
-- `source` is `products`, `categories`, or `cms_pages` (`CatalogSourceName`).
-- **Max 500 ids per call.** More than that throws — chunk them yourself.
-- `202` → `accepted`, with a per-id job list: `queued`, or `rejected` with a `violation`. The other ids
-  of the batch are still queued.
-- `jobId` is the same for every send of one id (per source and locale). Sending an id again is always safe.
-- `429` (over 30 calls a second from your IP) or `503` (backend can't queue right now) → `isThrottled()`,
-  nothing was queued. Wait `retryAfterSeconds` (1 s when the backend sends no `Retry-After`) and send the
-  same ids again.
-- Auth/validation failures throw `CatalogIngestException` (`getStatusCode()`, `getBackendErrorCode()`).
+- It sends `POST {backend}/api/v1/catalog/changes` with `Authorization: Bearer {siteKey}.{ingestSecret}`.
+- `source` is `products`, `categories` or `cms_pages` (`CatalogSourceName`).
+- **Send 1 to 500 ids per call.** Anything else throws `InvalidArgumentException`, so chunk them yourself.
+- `202` → `accepted`, with one job per id: `queued`, or `rejected` with a `violation`. The other ids
+  are still queued.
+- `jobId` stays the same for every send of one id, per source and locale. Sending an id again is safe.
+- `429` (over 30 calls a second from your IP) or `503` (the backend can't queue right now) →
+  `isThrottled()`, and nothing was queued. Wait `retryAfterSeconds` and send the same ids again. With
+  no `Retry-After` header, it's 1 second.
+- Auth and validation failures throw `CatalogIngestException` (`getStatusCode()`, `getBackendErrorCode()`).
 
 ## Chat click tracking
 
 Links the chat sends to your site carry a `neikaclid` query parameter. Report the landing and the
-orders it leads to, and the dashboard shows chat link visits, orders and revenue. Same auth and
-setup as the catalog client.
+orders it leads to, and the dashboard shows chat link visits, orders and revenue. Auth and setup match
+the catalog client.
 
 ```php
 use Neika\Sdk\DTO\ChatOrder;
@@ -334,25 +335,32 @@ try {
     // landing page view: a real browser GET, after the response succeeded
     $clickId = (new ClickId())->find($_GET);
     if ($clickId !== null) {
+        $session->set('neikaclid', $clickId);
         $telemetry->reportLinkVisit($credentials, $clickId, 'https://shop.example/product/clipper');
     }
 
-    // order placed: keep the click id (e.g. in the session) until checkout
-    $telemetry->reportOrder($credentials, new ChatOrder($clickId, $order->getNumber(), 123450, 'CZK'));
+    // order placed: report it only when the session kept a click id
+    $orderClickId = $session->get('neikaclid');
+    if ($orderClickId !== null) {
+        $telemetry->reportOrder($credentials, new ChatOrder($orderClickId, $order->getNumber(), 123450, 'CZK'));
+    }
 } catch (TelemetryException $exception) {
     $logger->warning($exception->getMessage());   // never fail the page or the order over it
 }
 ```
 
-- `POST {backend}/api/v1/catalog/link-visits` → `{clickId, pageUrl}`. Send the page URL without query or fragment.
-- `POST {backend}/api/v1/catalog/chat-orders` → `{clickId, orderNumber, revenue, currency}`.
-- **`revenue` is in ISO 4217 minor units**: CZK 1234.50 → `123450`, JPY 500 → `500`. `currency` is the ISO code.
+- `POST {backend}/api/v1/catalog/link-visits` sends `{clickId, pageUrl}`. Send the page URL without
+  query or fragment.
+- `POST {backend}/api/v1/catalog/chat-orders` sends `{clickId, orderNumber, revenue, currency}`.
+- **`revenue` is in ISO 4217 minor units**: CZK 1234.50 → `123450`, JPY 500 → `500`. `currency` is the
+  ISO code.
 - Skip bots, link previews and prefetch requests (`Sec-Purpose: prefetch`).
-- `202` → done. Anything else, `429` included, throws `TelemetryException` (`getStatusCode()`, `getBackendErrorCode()`). Log it and move on.
+- `202` means done. Anything else, `429` included, throws `TelemetryException` (`getStatusCode()`,
+  `getBackendErrorCode()`). Log it and move on.
 
 ## Pairing
 
-**The shop admin clicks Connect in the Neika dashboard; your shop gets its credentials.** The
+**The shop admin clicks Connect in the Neika dashboard, and your shop gets its credentials.** The
 browser lands on `{your base URL}/chatbot/pair?code=…`. Serve that path:
 
 ```php
@@ -383,51 +391,49 @@ $store->save($result->siteKey, $apiSecret, $ingestSecret, $result->channelCodes)
 header('Location: ' . $result->returnUrl, true, 302);
 ```
 
-- `POST {backend}/api/v1/tool-server-pairings/complete` → `{code, apiSecret, ingestSecret}`.
-- `200` → `PairingResult`: `siteKey`, `baseUrl` (the connection's address), `channelCodes`, `returnUrl`,
-  `verifiedDomains` (the website's verified domains).
-- **Compare the host of `baseUrl` with a host you configured**, never the request's `Host` header.
-  `HostMatcher::isSameHost()` ignores case, a trailing dot and IDN spelling; `www.` counts.
-  Mismatch → someone else's code; save nothing.
+- It sends `POST {backend}/api/v1/tool-server-pairings/complete` with `{code, apiSecret, ingestSecret}`.
+  Send it to your configured https backend only, never to a URL from the query.
+- `200` → `PairingResult`: `siteKey`, `baseUrl` (the connection's address), `channelCodes`, `returnUrl`
+  and `verifiedDomains` (the website's verified domains).
+- **Compare the host of `baseUrl` with a host you configured**, never with the request's `Host` header.
+  `HostMatcher::isSameHost()` ignores case, a trailing dot and IDN spelling, but not `www.`. On a
+  mismatch the code is someone else's: save nothing.
 - Serving the channels on several hosts? Check each host against `verifiedDomains` with
-  `HostMatcher::isCoveredByDomain($host, $domain)` → same domain or its subdomain, `www.` stripped.
-  Any host left over → save nothing.
-- Secrets: 32–128 chars; `bin2hex(random_bytes(32))` gives 64.
-- `apiSecret` → the backend sends it as `Authorization: Bearer <apiSecret>` on every `/chatbot/v1` call.
-- `ingestSecret` + `siteKey` → your `SiteCredentials`.
-- Redirect to `returnUrl` → the dashboard tests the connection with the new secret.
-- Send it to your configured https backend only, never to a URL from the query.
+  `HostMatcher::isCoveredByDomain($host, $domain)`. It accepts the domain and its subdomains, with
+  `www.` stripped. If any host isn't covered, save nothing.
+- Secrets are 32 to 128 characters; `bin2hex(random_bytes(32))` gives 64.
+- `apiSecret` is the bearer token the backend sends on every `/chatbot/v1` call.
+- `ingestSecret` and `siteKey` make your `SiteCredentials`.
+- Redirect to `returnUrl`, and the dashboard tests the connection with the new secret.
 
 > The code works once and expires 10 minutes after the admin clicked Connect. A refused code is used
-> up too → the admin clicks Connect again.
+> up too, so the admin clicks Connect again.
 
-Failures throw `PairingException`; `getErrorCode()` is the backend's `error.code` or one of these:
+Failures throw `PairingException`. `getErrorCode()` is the backend's `error.code` or one of these:
 
 | Code | When |
 |---|---|
-| `pairing_not_found` | Code unknown, used or expired |
-| `validation_failed` | Bad body, e.g. a secret outside 32–128 chars |
-| `rate_limited` | Too many unknown codes from your IP; wait 10 minutes |
-| `transport_failed` | Backend unreachable (`PairingException::TRANSPORT_FAILED`) |
-| `invalid_response` | Non-200 without an error code, or a 200 missing a field (`PairingException::INVALID_RESPONSE`) |
+| `pairing_not_found` | The code is unknown, used or expired. |
+| `validation_failed` | The body is bad, e.g. a secret outside 32–128 characters. |
+| `rate_limited` | Too many unknown codes came from your IP. Wait 10 minutes. |
+| `transport_failed` | The backend is unreachable (`PairingException::TRANSPORT_FAILED`). |
+| `invalid_response` | A non-200 came without an error code, or a 200 is missing a field (`PairingException::INVALID_RESPONSE`). |
 
 ## Widget embed
-
-Render the chat widget markup for any page:
 
 ```php
 use Neika\Sdk\Widget\WidgetSnippet;
 
 echo (new WidgetSnippet())->render(
     'https://neika.ai',  // backend origin
-    $siteKey,               // public site key
-    $cdnUrl,                // optional; '' → https://neika.b-cdn.net/widget/v1/chat.js
-    $locale,                // optional; '' → the browser detects it
-    defer: true,            // optional; false → plain <script src="…"> without defer
+    $siteKey,            // public site key
+    $cdnUrl,             // optional; '' → https://neika.b-cdn.net/widget/v1/chat.js
+    $locale,             // optional; '' → the browser detects it
+    defer: true,         // optional; false → plain <script src="…"> without defer
 );
 ```
 
-Emits the loader `<script>` and the `<ai-chat-widget>` element; all attribute values are escaped.
+It prints the loader `<script>` and the `<ai-chat-widget>` element, with every attribute value escaped.
 
 ## Tests
 
@@ -438,4 +444,4 @@ vendor/bin/phpunit
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

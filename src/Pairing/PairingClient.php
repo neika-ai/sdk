@@ -95,7 +95,7 @@ class PairingClient
         $isComplete = $hasSiteKey && $hasBaseUrl && $hasReturnUrl && $hasChannelCodes && $hasVerifiedDomains;
         if (!$isComplete) {
             throw new PairingException(
-                'The pairing backend answered with an incomplete result.',
+                'The pairing response is missing a field or has one of the wrong type.',
                 PairingException::INVALID_RESPONSE,
             );
         }

@@ -126,7 +126,7 @@ class ArgumentsSchemaGenerator
         $isExpectedType = $schema['type'] === $expectedType;
         if (!$isExpectedType) {
             throw new \LogicException(sprintf(
-                'The #[ToolChoice] property %s::$%s must be typed %s.',
+                'The #[ToolChoice] property "%s::$%s" must be typed "%s".',
                 $property->getDeclaringClass()->getName(),
                 $property->getName(),
                 $expectedType,

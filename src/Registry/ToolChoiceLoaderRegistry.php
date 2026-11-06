@@ -26,7 +26,7 @@ class ToolChoiceLoaderRegistry
         $loader = $this->findLoader($loaderClass);
         if ($loader === null) {
             throw new \LogicException(sprintf(
-                'The tool choice loader "%s" is not registered as a %s.',
+                'Tool choice loader "%s" is not registered. Implement "%s" and add it to the loaders.',
                 $loaderClass,
                 ToolChoiceLoaderInterface::class,
             ));

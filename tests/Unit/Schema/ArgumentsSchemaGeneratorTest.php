@@ -55,7 +55,7 @@ class ArgumentsSchemaGeneratorTest extends TestCase
     public function testToolChoiceOnAPropertyOfTheWrongTypeIsRefused(): void
     {
         $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage(MistypedRegionArguments::class . '::$region must be typed string');
+        $this->expectExceptionMessage(MistypedRegionArguments::class . '::$region" must be typed "string"');
 
         $this->generator->generate(MistypedRegionArguments::class);
     }

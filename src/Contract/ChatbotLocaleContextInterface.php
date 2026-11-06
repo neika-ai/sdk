@@ -18,9 +18,8 @@ interface ChatbotLocaleContextInterface
     public function getChannelLocales(): array;
 
     /**
-     * @invariant Answers for every channel, not the one the request resolved. The source list
-     *            carries no channel, so a backend addressing several channels through a single
-     *            host must still learn every locale it may later read.
+     * @invariant Every channel's locales, not just the resolved one: the source list has no channel,
+     *            and a backend reading several channels through one host needs them all.
      *
      * @return list<string>
      */
