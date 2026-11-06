@@ -137,6 +137,21 @@ new FormField('orderNumber', 'order.number', FormFieldType::Text, true, placehol
 > Needs a chatbot backend that reads `privateValues`. An older one sends `{{customer_full_name}}` to the model as
 > plain text.
 
+**Mark arguments that carry personal data.** Put `#[Sensitive]` on the property. A model hosted outside the EU
+sees a placeholder for it, and your tool still gets the real value:
+
+```php
+use Neika\Sdk\Validator\Sensitive;
+
+#[Assert\NotBlank]
+#[Assert\Email]
+#[Sensitive]
+public string $email = '',
+```
+
+Unmarked arguments reach that model as typed. Mark contact data only: emails, phones, names, addresses, customer
+and order numbers.
+
 ## Standalone setup (no framework)
 
 The SDK owns the logic, not the transport. You wire the registries once, then map four HTTP routes
@@ -166,8 +181,10 @@ $validator      = Validation::createValidatorBuilder()->enableAttributeMapping()
 ```php
 $out = [];
 foreach ($toolRegistry->all() as $tool) {
+    $argumentsClass = $tool->getArgumentsClass();
     $out[] = $tool->getDefinition()
-        ->withInputSchema($schema->generate($tool->getArgumentsClass()))
+        ->withInputSchema($schema->generate($argumentsClass))
+        ->withSensitiveArguments($schema->listSensitiveArguments($argumentsClass))
         ->jsonSerialize();
 }
 echo json_encode(['tools' => $out]);
@@ -238,7 +255,7 @@ these paths — only the origin (scheme + host) is yours to configure on the bac
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/chatbot/v1/tools` | `Accept-Language` (optional) | `{ "tools": [ {name, description, inputSchema, ui?} ] }` |
+| GET | `/chatbot/v1/tools` | `Accept-Language` (optional) | `{ "tools": [ {name, description, inputSchema, sensitiveArguments, ui?} ] }` |
 | POST | `/chatbot/v1/tools/{name}` | `{ "arguments": {...}, "context": { "conversationId", "locale", "channelCode"? } }` | `{ "content": [{type,text}], "blocks": [], "isError": bool, "privateValues"?: [{key,value}] }` |
 | GET | `/chatbot/v1/sources` | — | `{ "sources": [ {name, description, locales} ] }` |
 | GET | `/chatbot/v1/sources/{name}` | `?locale=&channel=&cursor=&ids[]=` (`ids[]` max 500; then `cursor` ignored, `nextCursor` null) | `{ "documents": [...], "nextCursor": string\|null }` |

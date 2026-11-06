@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Neika\Sdk\Schema;
 
 use Neika\Sdk\Registry\ToolChoiceLoaderRegistry;
+use Neika\Sdk\Validator\Sensitive;
 use Neika\Sdk\Validator\ToolChoice;
 use Symfony\Component\Validator\Constraints\All;
 use Symfony\Component\Validator\Constraints\Choice;
@@ -49,6 +50,24 @@ class ArgumentsSchemaGenerator
         $schema['additionalProperties'] = false;
 
         return $schema;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function listSensitiveArguments(string $argumentsClass): array
+    {
+        $reflection = new \ReflectionClass($argumentsClass);
+        $sensitiveArguments = [];
+
+        foreach ($reflection->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+            $isSensitive = $property->getAttributes(Sensitive::class) !== [];
+            if ($isSensitive) {
+                $sensitiveArguments[] = $property->getName();
+            }
+        }
+
+        return $sensitiveArguments;
     }
 
     private function buildPropertySchema(\ReflectionProperty $property): ?array

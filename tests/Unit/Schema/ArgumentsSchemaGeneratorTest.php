@@ -83,6 +83,13 @@ class ArgumentsSchemaGeneratorTest extends TestCase
         self::assertFalse($schema['additionalProperties']);
     }
 
+    public function testOnlyPropertiesMarkedSensitiveAreListedAsSensitiveArguments(): void
+    {
+        $sensitiveArguments = $this->generator->listSensitiveArguments(ContactArguments::class);
+
+        self::assertSame(['email'], $sensitiveArguments);
+    }
+
     public function testNullablePropertyIsNotRequired(): void
     {
         $schema = $this->generator->generate(NullableArguments::class);
