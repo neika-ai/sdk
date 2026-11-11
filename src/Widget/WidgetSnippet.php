@@ -12,12 +12,20 @@ class WidgetSnippet
         string $cdnUrl = '',
         string $locale = '',
         bool $defer = true,
+        string $identityToken = '',
+        string $identityTokenUrl = '',
     ): string {
         $scriptUrl = $this->resolveScriptUrl($cdnUrl);
         $deferAttribute = $defer ? ' defer' : '';
 
         $script = sprintf('<script src="%s"%s></script>', $this->escape($scriptUrl), $deferAttribute);
-        $element = $this->renderElement($backendUrl, $siteKey, $locale);
+        $element = $this->renderElement([
+            'site-key' => $siteKey,
+            'locale' => $locale,
+            'backend-url' => $backendUrl,
+            'identity-token' => $identityToken,
+            'identity-token-url' => $identityTokenUrl,
+        ]);
 
         return $script . "\n" . $element;
     }
@@ -37,20 +45,30 @@ class WidgetSnippet
         return $this->getDefaultCdnUrl();
     }
 
-    private function renderElement(string $backendUrl, string $siteKey, string $locale): string
+    /**
+     * @return list<string>
+     */
+    private function getAlwaysRenderedAttributes(): array
     {
-        $localeAttribute = '';
-        $hasLocale = $locale !== '';
-        if ($hasLocale) {
-            $localeAttribute = sprintf(' locale="%s"', $this->escape($locale));
+        return ['site-key', 'backend-url'];
+    }
+
+    /**
+     * @param array<string, string> $attributes
+     */
+    private function renderElement(array $attributes): string
+    {
+        $rendered = '';
+
+        foreach ($attributes as $name => $value) {
+            $isAlwaysRendered = in_array($name, $this->getAlwaysRenderedAttributes(), true);
+            $hasValue = $value !== '';
+            if ($isAlwaysRendered || $hasValue) {
+                $rendered .= sprintf(' %s="%s"', $name, $this->escape($value));
+            }
         }
 
-        return sprintf(
-            '<ai-chat-widget site-key="%s"%s backend-url="%s"></ai-chat-widget>',
-            $this->escape($siteKey),
-            $localeAttribute,
-            $this->escape($backendUrl),
-        );
+        return sprintf('<ai-chat-widget%s></ai-chat-widget>', $rendered);
     }
 
     private function escape(string $value): string

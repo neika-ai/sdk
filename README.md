@@ -9,6 +9,7 @@ Sylius users: use [`neika-ai/sylius-plugin`](https://github.com/neika-ai/sylius-
 
 - [Tools and data sources](#tools-and-data-sources) — one class each; the JSON Schema comes from your validator constraints
 - [Personal data in tools](#personal-data-in-tools) — a model hosted outside the EU reads placeholders; the customer sees real values
+- [Who is chatting](#who-is-chatting) — a tool answers for the signed-in person; neither the model nor the visitor can change who that is
 - [Standalone setup](#standalone-setup) — the four `/chatbot/v1` endpoints in plain PHP
 - [Push catalog changes](#push-catalog-changes) — the chatbot re-indexes just the entries you changed
 - [Chat click tracking](#chat-click-tracking) — chat link visits, orders and revenue in the dashboard
@@ -145,6 +146,120 @@ public string $email = '',
 Unmarked arguments reach the model as typed. Mark contact data only: emails, phones, names, addresses,
 customer and order numbers.
 
+## Who is chatting
+
+**Sign the person's identity on your server, and every tool call carries it.** Use it for "my orders",
+"packages in my storage unit" and anything else that depends on who asks.
+
+1. The page that shows the widget:
+
+```php
+use Neika\Sdk\DTO\ChatIdentity;
+use Neika\Sdk\DTO\SiteCredentials;
+use Neika\Sdk\Identity\IdentityTokenIssuer;
+use Neika\Sdk\Widget\WidgetSnippet;
+
+$token = (new IdentityTokenIssuer())->issue(
+    new SiteCredentials($siteKey, $ingestSecret),
+    new ChatIdentity('admin-42', ['storageUnit' => 'B2']),
+);
+
+echo (new WidgetSnippet())->render('https://neika.ai', $siteKey, identityToken: $token);
+```
+
+> Send every page that prints a token with `Cache-Control: private, no-store`. A cached page gives one
+> person's identity to the next visitor.
+
+2. Your tool:
+
+```php
+public function getDefinition(): ToolDefinition
+{
+    return (new ToolDefinition('list_packages', 'app.chatbot.packages.description'))->withRequiredIdentity();
+}
+
+public function execute(object $arguments, ToolCallContext $context): ToolResult
+{
+    $identity = $context->getIdentity();
+    $orders = $this->orders->findToPack($identity->subject, $identity->claims['storageUnit']);
+    // ...
+}
+```
+
+**Want your own class instead of an array?** Pass it to `getIdentity()`:
+
+```php
+class PackerIdentity
+{
+    public function __construct(
+        public readonly string $subject,
+        public readonly string $storageUnit,
+        public readonly array $roles = [],
+    ) {
+    }
+}
+
+$packer = $context->getIdentity(PackerIdentity::class);
+$orders = $this->orders->findToPack($packer->subject, $packer->storageUnit);
+```
+
+- `subject` and each claim go to the constructor parameter of the same name. Nested data arrives as arrays.
+- A claim with no parameter, a missing required parameter or a wrong type throws `IdentityMappingException`.
+
+**Never take the person's id as a tool argument.** The model writes the arguments. The identity comes
+from your signature.
+
+| Part | Rule |
+|---|---|
+| `subject` | Your id for the person, up to 255 characters. Use an id, not an email. |
+| `claims` | Any JSON data you want the tool to have, keyed by name. Nested arrays are fine. Up to 4096 bytes as JSON. Key order isn't kept. No claim named `subject`. |
+| Lifetime | 30 minutes. Third argument of `issue()` sets it: 300 to 7200 seconds. Anything else throws `InvalidArgumentException`. |
+| `withRequiredIdentity()` | Chats without an identity never see the tool. After you deploy it, refresh the tool list in the Neika dashboard; until then the tool is offered and refuses. |
+| `getIdentity()` | Throws `IdentityRequiredException` (`identity_required`, 403) when the call has no identity. |
+| `hasIdentity()` | For a tool that works for everyone and shows more to a signed-in person. |
+
+- **Sign with the ingest secret your site got from [pairing](#pairing).** Only the site paired with that
+  secret gets the identity in its tool calls. An ingest secret added by hand in the dashboard can't sign.
+- **One person, one chat.** On a shared browser each `subject` gets its own conversation.
+- The identity stays with the conversation. A token for another `subject` can't be attached to it.
+
+When the token runs out:
+
+| Page | What happens |
+|---|---|
+| Chat already open | Tools marked `withRequiredIdentity()` answer that the sign-in expired. Other tools get no identity. |
+| New chat | It doesn't start; the visitor sees "try again". |
+| After a reload | The page prints a new token and the open chat picks it up on the next message. |
+
+### Keep long-open pages signed in
+
+Optional. Serve a route that returns a new token, and pass its URL:
+
+```php
+// POST /chat-token, behind your own login
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+echo json_encode(['token' => $issuer->issue($credentials, $identity)]);
+```
+
+```php
+echo (new WidgetSnippet())->render(
+    'https://neika.ai',
+    $siteKey,
+    identityToken: $token,
+    identityTokenUrl: '/chat-token',
+);
+```
+
+- The widget sends a `POST` there, with the visitor's cookies, when it starts a chat or sends a message
+  and its token has under 30 seconds left. No reload.
+- Keep the route on the page's own origin. Return the same `subject` the page was rendered for.
+- Signed out? Return `401`. The widget asks again a minute later.
+
+Not covered:
+
+- The dashboard's test chat has no identity, so try these tools on your own page.
+
 ## Standalone setup
 
 Without a framework, you bring auth, routing and argument deserialization. The SDK does the rest.
@@ -192,6 +307,7 @@ echo json_encode(['tools' => $out]);
    bundles use `symfony/serializer`:
 
 ```php
+use Neika\Sdk\DTO\ChatIdentity;
 use Neika\Sdk\DTO\ToolCallContext;
 use Neika\Sdk\DTO\Violation;
 use Neika\Sdk\Exception\ArgumentsValidationException;
@@ -210,10 +326,13 @@ if ($violations !== []) {
     throw new ArgumentsValidationException($violations);
 }
 
+$identity = $body['context']['identity'] ?? null;
+
 $context = new ToolCallContext(
     $body['context']['conversationId'],
     $body['context']['locale'],
     $body['context']['channelCode'] ?? null,
+    $identity === null ? null : new ChatIdentity($identity['subject'], $identity['claims'] ?? []),
 );
 echo json_encode($tool->execute($arguments, $context)->jsonSerialize());
 ```
@@ -252,8 +371,8 @@ channel's locales with `LocaleMatcher`.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/chatbot/v1/tools` | `Accept-Language` (optional) | `{ "tools": [ {name, description, inputSchema, sensitiveArguments, ui?} ] }` |
-| POST | `/chatbot/v1/tools/{name}` | `{ "arguments": {...}, "context": { "conversationId", "locale", "channelCode"? } }` | `{ "content": [{type,text}], "blocks": [], "isError": bool, "privateValues"?: [{key,value}] }` |
+| GET | `/chatbot/v1/tools` | `Accept-Language` (optional) | `{ "tools": [ {name, description, inputSchema, sensitiveArguments, requiresIdentity?, ui?} ] }` |
+| POST | `/chatbot/v1/tools/{name}` | `{ "arguments": {...}, "context": { "conversationId", "locale", "channelCode"?, "identity"?: {subject, claims} } }` | `{ "content": [{type,text}], "blocks": [], "isError": bool, "privateValues"?: [{key,value}] }` |
 | GET | `/chatbot/v1/sources` | — | `{ "sources": [ {name, description, locales} ] }` |
 | GET | `/chatbot/v1/sources/{name}` | `?locale=&channel=&cursor=&ids[]=` | `{ "documents": [...], "nextCursor": string\|null }` |
 
@@ -270,6 +389,7 @@ channel's locales with `LocaleMatcher`.
 | `ArgumentsValidationException` | `validation_failed`, with `violations` | 422 |
 | `InvalidCursorException` | `invalid_cursor` | 400 |
 | `InvalidLocaleException` | `invalid_locale` | 400 |
+| `IdentityRequiredException` | `identity_required` | 403 |
 
 ## Push catalog changes
 
@@ -432,6 +552,8 @@ echo (new WidgetSnippet())->render(
     defer: true,         // optional; false → plain <script src="…"> without defer
 );
 ```
+
+`identityToken` and `identityTokenUrl`: see [Who is chatting](#who-is-chatting).
 
 It prints the loader `<script>` and the `<ai-chat-widget>` element, with every attribute value escaped.
 

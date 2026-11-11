@@ -18,6 +18,7 @@ class ToolDefinition implements \JsonSerializable
         public readonly ?array $inputSchema = null,
         public readonly ?string $translationDomain = null,
         public readonly array $sensitiveArguments = [],
+        public readonly bool $requiresIdentity = false,
     ) {
     }
 
@@ -30,6 +31,20 @@ class ToolDefinition implements \JsonSerializable
             $inputSchema,
             $this->translationDomain,
             $this->sensitiveArguments,
+            $this->requiresIdentity,
+        );
+    }
+
+    public function withRequiredIdentity(): self
+    {
+        return new self(
+            $this->name,
+            $this->description,
+            $this->ui,
+            $this->inputSchema,
+            $this->translationDomain,
+            $this->sensitiveArguments,
+            true,
         );
     }
 
@@ -45,6 +60,7 @@ class ToolDefinition implements \JsonSerializable
             $this->inputSchema,
             $this->translationDomain,
             $sensitiveArguments,
+            $this->requiresIdentity,
         );
     }
 
@@ -57,6 +73,7 @@ class ToolDefinition implements \JsonSerializable
             $this->inputSchema,
             $this->translationDomain,
             $this->sensitiveArguments,
+            $this->requiresIdentity,
         );
     }
 
@@ -68,6 +85,10 @@ class ToolDefinition implements \JsonSerializable
             'inputSchema' => $this->inputSchema ?? ['type' => 'object', 'additionalProperties' => false],
             'sensitiveArguments' => $this->sensitiveArguments,
         ];
+
+        if ($this->requiresIdentity) {
+            $serialized['requiresIdentity'] = true;
+        }
 
         if ($this->ui !== null) {
             $serialized['ui'] = $this->ui->jsonSerialize();
