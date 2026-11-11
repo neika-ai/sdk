@@ -10,7 +10,7 @@ Sylius users: use [`neika-ai/sylius-plugin`](https://github.com/neika-ai/sylius-
 - [Tools and data sources](#tools-and-data-sources) — one class each; the JSON Schema comes from your validator constraints
 - [Personal data in tools](#personal-data-in-tools) — a model hosted outside the EU reads placeholders; the customer sees real values
 - [Who is chatting](#who-is-chatting) — a tool answers for the signed-in person; neither the model nor the visitor can change who that is
-- [Standalone setup](#standalone-setup) — the four `/chatbot/v1` endpoints in plain PHP
+- [Standalone setup](#standalone-setup) — the four `/neika-chatbot/v1` endpoints in plain PHP
 - [Push catalog changes](#push-catalog-changes) — the chatbot re-indexes just the entries you changed
 - [Chat click tracking](#chat-click-tracking) — chat link visits, orders and revenue in the dashboard
 - [Pairing](#pairing) — the shop admin clicks **Connect**; nobody copies a secret
@@ -289,7 +289,7 @@ $validator      = Validation::createValidatorBuilder()
 
 > Without that validator factory, validating a `#[ToolChoice]` argument throws `ArgumentCountError`.
 
-2. `GET /chatbot/v1/tools` lists the tools with their input schemas:
+2. `GET /neika-chatbot/v1/tools` lists the tools with their input schemas:
 
 ```php
 $out = [];
@@ -303,7 +303,7 @@ foreach ($toolRegistry->all() as $tool) {
 echo json_encode(['tools' => $out]);
 ```
 
-3. `POST /chatbot/v1/tools/{name}` runs a tool. Deserialize the arguments with any deserializer; the
+3. `POST /neika-chatbot/v1/tools/{name}` runs a tool. Deserialize the arguments with any deserializer; the
    bundles use `symfony/serializer`:
 
 ```php
@@ -337,7 +337,7 @@ $context = new ToolCallContext(
 echo json_encode($tool->execute($arguments, $context)->jsonSerialize());
 ```
 
-4. `GET /chatbot/v1/sources` and `GET /chatbot/v1/sources/{name}` list and read the data sources:
+4. `GET /neika-chatbot/v1/sources` and `GET /neika-chatbot/v1/sources/{name}` list and read the data sources:
 
 ```php
 use Neika\Sdk\DTO\SourceQuery;
@@ -366,15 +366,15 @@ channel's locales with `LocaleMatcher`.
 
 ## HTTP contract
 
-**The paths are fixed.** The backend calls `/chatbot/v1/...` on your host; you only set the origin
+**The paths are fixed.** The backend calls `/neika-chatbot/v1/...` on your host; you only set the origin
 (scheme and host) on the backend.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/chatbot/v1/tools` | `Accept-Language` (optional) | `{ "tools": [ {name, description, inputSchema, sensitiveArguments, requiresIdentity?, ui?} ] }` |
-| POST | `/chatbot/v1/tools/{name}` | `{ "arguments": {...}, "context": { "conversationId", "locale", "channelCode"?, "identity"?: {subject, claims} } }` | `{ "content": [{type,text}], "blocks": [], "isError": bool, "privateValues"?: [{key,value}] }` |
-| GET | `/chatbot/v1/sources` | — | `{ "sources": [ {name, description, locales} ] }` |
-| GET | `/chatbot/v1/sources/{name}` | `?locale=&channel=&cursor=&ids[]=` | `{ "documents": [...], "nextCursor": string\|null }` |
+| GET | `/neika-chatbot/v1/tools` | `Accept-Language` (optional) | `{ "tools": [ {name, description, inputSchema, sensitiveArguments, requiresIdentity?, ui?} ] }` |
+| POST | `/neika-chatbot/v1/tools/{name}` | `{ "arguments": {...}, "context": { "conversationId", "locale", "channelCode"?, "identity"?: {subject, claims} } }` | `{ "content": [{type,text}], "blocks": [], "isError": bool, "privateValues"?: [{key,value}] }` |
+| GET | `/neika-chatbot/v1/sources` | — | `{ "sources": [ {name, description, locales} ] }` |
+| GET | `/neika-chatbot/v1/sources/{name}` | `?locale=&channel=&cursor=&ids[]=` | `{ "documents": [...], "nextCursor": string\|null }` |
 
 - `ids[]` takes up to 500 ids. With `ids[]`, the cursor is ignored and `nextCursor` is `null`.
 - **Check the auth header yourself.** The backend sends `Authorization: Bearer <apiSecret>`. Compare it
@@ -481,7 +481,7 @@ try {
 ## Pairing
 
 **The shop admin clicks Connect in the Neika dashboard, and your shop gets its credentials.** The
-browser lands on `{your base URL}/chatbot/pair?code=…`. Serve that path:
+browser lands on `{your base URL}/neika-chatbot/pair?code=…`. Serve that path:
 
 ```php
 use Neika\Sdk\Exception\PairingException;
@@ -522,7 +522,7 @@ header('Location: ' . $result->returnUrl, true, 302);
   `HostMatcher::isCoveredByDomain($host, $domain)`. It accepts the domain and its subdomains, with
   `www.` stripped. If any host isn't covered, save nothing.
 - Secrets are 32 to 128 characters; `bin2hex(random_bytes(32))` gives 64.
-- `apiSecret` is the bearer token the backend sends on every `/chatbot/v1` call.
+- `apiSecret` is the bearer token the backend sends on every `/neika-chatbot/v1` call.
 - `ingestSecret` and `siteKey` make your `SiteCredentials`.
 - Redirect to `returnUrl`, and the dashboard tests the connection with the new secret.
 
@@ -547,7 +547,7 @@ use Neika\Sdk\Widget\WidgetSnippet;
 echo (new WidgetSnippet())->render(
     'https://neika.ai',  // backend origin
     $siteKey,            // public site key
-    $cdnUrl,             // optional; '' → https://neika.b-cdn.net/widget/v1/chat.js
+    $cdnUrl,             // optional; '' → https://neika.b-cdn.net/widget/neika-chatbot.js
     $locale,             // optional; '' → the browser detects it
     defer: true,         // optional; false → plain <script src="…"> without defer
 );
@@ -555,7 +555,7 @@ echo (new WidgetSnippet())->render(
 
 `identityToken` and `identityTokenUrl`: see [Who is chatting](#who-is-chatting).
 
-It prints the loader `<script>` and the `<ai-chat-widget>` element, with every attribute value escaped.
+It prints the loader `<script>` and the `<neika-chatbot-widget>` element, with every attribute value escaped.
 
 ## Tests
 

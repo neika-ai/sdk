@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.0
+
+**Breaking: the backend calls `/neika-chatbot/v1/...` and the widget tag is `<neika-chatbot-widget>`.** Needs a Neika backend from 2026-11-11 or later.
+
+- Serve the four endpoints and pairing under the new paths:
+
+  ```diff
+  -/chatbot/v1/tools
+  +/neika-chatbot/v1/tools
+  -/chatbot/pair
+  +/neika-chatbot/pair
+  ```
+
+- `WidgetSnippet::render()` prints `<neika-chatbot-widget>`, and an empty CDN URL means `https://neika.b-cdn.net/widget/neika-chatbot.js`. A cached page with the old `<ai-chat-widget>` keeps working for 30 days.
+
 ## v0.2.1
 
 - **Tell tools who is chatting.** `IdentityTokenIssuer::issue()` signs a `ChatIdentity` with your ingest

@@ -32,7 +32,7 @@ class WidgetSnippet
 
     public function getDefaultCdnUrl(): string
     {
-        return 'https://neika.b-cdn.net/widget/v1/chat.js';
+        return 'https://neika.b-cdn.net/widget/neika-chatbot.js';
     }
 
     private function resolveScriptUrl(string $cdnUrl): string
@@ -68,7 +68,7 @@ class WidgetSnippet
             }
         }
 
-        return sprintf('<ai-chat-widget%s></ai-chat-widget>', $rendered);
+        return sprintf('<neika-chatbot-widget%s></neika-chatbot-widget>', $rendered);
     }
 
     private function escape(string $value): string

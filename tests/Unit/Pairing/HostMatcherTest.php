@@ -24,7 +24,7 @@ class HostMatcherTest extends TestCase
     public static function provideHosts(): iterable
     {
         yield 'bare host' => ['shop.cz', 'shop.cz'];
-        yield 'url with path' => ['https://shop.cz/chatbot/pair?code=abc', 'shop.cz'];
+        yield 'url with path' => ['https://shop.cz/neika-chatbot/pair?code=abc', 'shop.cz'];
         yield 'url with port' => ['https://shop.cz:8443', 'shop.cz'];
         yield 'surrounding whitespace' => ['  shop.cz  ', 'shop.cz'];
         yield 'uppercase' => ['HTTPS://Shop.CZ', 'shop.cz'];
